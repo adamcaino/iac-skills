@@ -197,6 +197,116 @@ When asked to build Bicep, follow this sequence.
 9. Exclude local deployment instructions and assume deployment is handled by CI/CD pipelines.
 10. Review the generated design against the Well-Architected pillars before finishing.
 
+## Bicep Compilation and Validation Requirements
+
+Before delivering the Bicep code to the user, execute the following validation steps to ensure the generated configuration is correct and ready for deployment:
+
+1. **Compile each Bicep file:**
+	```bash
+	bicep build <filename>.bicep
+	```
+	or use Azure CLI:
+	```bash
+	az bicep build --file <filename>.bicep
+	```
+	This compiles the Bicep template to ARM JSON and validates syntax and resource declarations.
+
+2. **Compile main.bicep last to verify module orchestration:**
+	```bash
+	bicep build main.bicep
+	```
+	This ensures all module references, outputs, and compositions are valid.
+
+3. **Both commands must complete successfully** with exit code 0 before declaring the task complete.
+
+### Compilation Failures
+
+If compilation fails:
+- Identify and fix syntax errors, missing parameters, or invalid module references
+- Ensure all required parameters are present and correctly typed
+- Verify that module outputs used in composition exist and have correct types
+- Check that `targetScope` matches module scope expectations
+- Re-run compilation until all errors are resolved
+- Do not deliver code that fails compilation
+
+### Why This Matters
+
+- Bicep compilation catches typos, missing properties, and invalid resource declarations early
+- Compilation ensures all modules and references are resolvable
+- Early validation prevents Azure deployment failures and reduces deployment time
+- This step is non-negotiable and must complete successfully for every Bicep delivery
+
+## Resource Naming Convention
+
+Use the following standardized naming format for all Azure resources:
+
+```
+<resource-acronym>-<workload>-<environment>-<location-code>-<instance>
+```
+
+### Format Components
+
+| Component | Description | Examples |
+|-----------|-------------|----------|
+| **resource-acronym** | Two-letter code for the Azure resource type | `rg` (resource group), `vnet` (virtual network), `nsg` (network security group), `fw` (firewall), `st` (storage account), `kv` (key vault), `law` (log analytics workspace), `pip` (public IP), `vhub` (virtual hub), `udr` (user-defined route), `nic` (network interface), `vm` (virtual machine) |
+| **workload** | Short workload identifier or resource type/purpose | `lz` (landing zone), `db` (database), `app` (application), `shared` (shared services) |
+| **environment** | Environment name | `prod`, `staging`, `dev`, `test` |
+| **location-code** | Short Azure region code (3 letters) | `uks` (uksouth), `ukw` (ukwest), `euw` (westeurope), `eun` (northeurope), `usc` (centralus), `use` (eastus) |
+| **instance** | Instance number (default: 01, increment for multiple instances) | `01`, `02`, `03` |
+
+### Examples
+
+```
+rg-lz-prod-uks-01        # Resource group for landing zone, prod, UK South
+vnet-lz-prod-uks-01      # Virtual network
+nsg-app-prod-uks-01      # Network security group for application subnet
+fw-lz-prod-uks-01        # Azure Firewall
+st-lz-prod-uks-01        # Storage account
+kv-lz-prod-uks-01        # Key Vault
+law-lz-prod-uks-01       # Log Analytics Workspace
+pip-fw-prod-uks-01       # Public IP for firewall
+vhub-lz-prod-uks-01      # Virtual Hub
+udr-spoke-prod-uks-01    # User-defined route table
+nic-db-prod-uks-01       # Network interface
+vm-app-prod-uks-01       # Virtual machine
+```
+
+### Naming Rules
+
+- Use lowercase alphanumeric characters and hyphens only.
+- Instance numbers start at `01` and increment for additional instances of the same resource type.
+- For resources that span multiple tiers or purposes within a workload, extend the workload component with a suffix:
+  - `nsg-db-prod-uks-01` (database tier NSG)
+  - `nsg-app-prod-uks-01` (application tier NSG)
+  - `snet-db-prod-uks-01` (database subnet)
+  - `snet-app-prod-uks-01` (application subnet)
+- Centralize naming logic in shared variables or a dedicated naming module (e.g., `modules/naming.bicep`).
+- All resource names are stored as computed variables and referenced throughout the Bicep files.
+
+### Name-Length Validation
+
+Enforce Azure resource name-length constraints using parameter decorators and, when enabled, assertions:
+- **Key Vault:** 24 characters max
+- **Storage Account:** 24 characters max
+- **DNS zones, App Service names, container registries:** 63 characters max
+
+Example validation in a parameter:
+
+```bicep
+param workloadName string
+@maxLength(10)
+param environment string
+param locationShort string
+
+var keyVaultName = 'kv-${workloadName}-${environment}-${locationShort}'
+
+// Use decorators for compile-time validation
+// Optionally add assertions when enabled:
+// assert kvNameLength (length(keyVaultName) <= 24) : 'Key Vault name "${keyVaultName}" exceeds 24 characters. Reduce workload, environment, or location code length.'
+```
+
+
+Use these default mappings when choosing module names.
 ## Resource Family Mapping
 
 Use these default mappings when choosing module names.
