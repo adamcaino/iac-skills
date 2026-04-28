@@ -198,6 +198,41 @@ When asked to build Terraform, follow this sequence.
 10. Exclude local deployment instructions and assume deployment is handled by CI/CD pipelines.
 11. Review the generated design against the Well-Architected pillars before finishing.
 
+## Terraform Validation Requirements
+
+Before delivering the Terraform code to the user, execute the following validation steps to ensure the generated configuration is correct and ready for deployment:
+
+1. **Initialize Terraform without backend:**
+   ```bash
+   cd <generated-directory>
+   terraform init -backend=false
+   ```
+   This initializes the working directory and downloads required provider plugins without configuring a remote backend.
+
+2. **Validate Terraform syntax and configuration:**
+   ```bash
+   terraform validate
+   ```
+   This checks that the configuration is syntactically valid and internally consistent.
+
+3. **Both commands must complete successfully** with exit code 0 before declaring the task complete.
+
+### Validation Failures
+
+If validation fails:
+- Identify and fix syntax errors, missing variable declarations, or invalid resource references
+- Ensure all required attributes are present and correctly typed
+- Verify that interpolations and computed values are valid
+- Re-run validation until all errors are resolved
+- Do not deliver code that fails validation
+
+### Why This Matters
+
+- Terraform validation catches typos, missing required attributes, and invalid resource configurations early
+- Validation ensures providers are compatible and available
+- Early validation prevents CI/CD pipeline failures and reduces deployment time
+- This step is non-negotiable and must complete successfully for every Terraform delivery
+
 ## Resource Family Mapping
 
 Use these default mappings when choosing file names.
@@ -221,6 +256,71 @@ Use these default mappings when choosing file names.
 | Role assignments | `role_assignments.tf` |
 
 If a requested resource family is not listed, create a new plural snake case file that matches the resource type, such as `application_gateways.tf` or `container_registries.tf`.
+
+## Resource Naming Convention
+
+Use the following standardized naming format for all Azure resources:
+
+```
+<resource-acronym>-<workload>-<environment>-<location-code>-<instance>
+```
+
+### Format Components
+
+| Component | Description | Examples |
+|-----------|-------------|----------|
+| **resource-acronym** | Two-letter code for the Azure resource type | `rg` (resource group), `vnet` (virtual network), `nsg` (network security group), `fw` (firewall), `st` (storage account), `kv` (key vault), `law` (log analytics workspace), `pip` (public IP), `vhub` (virtual hub), `udr` (user-defined route), `nic` (network interface), `vm` (virtual machine) |
+| **workload** | Short workload identifier or resource type/purpose | `lz` (landing zone), `db` (database), `app` (application), `shared` (shared services) |
+| **environment** | Environment name | `prod`, `staging`, `dev`, `test` |
+| **location-code** | Short Azure region code (3 letters) | `uks` (uksouth), `ukw` (ukwest), `euw` (westeurope), `eun` (northeurope), `usc` (centralus), `use` (eastus) |
+| **instance** | Instance number (default: 01, increment for multiple instances) | `01`, `02`, `03` |
+
+### Examples
+
+```
+rg-lz-prod-uks-01        # Resource group for landing zone, prod, UK South
+vnet-lz-prod-uks-01      # Virtual network
+nsg-app-prod-uks-01      # Network security group for application subnet
+fw-lz-prod-uks-01        # Azure Firewall
+st-lz-prod-uks-01        # Storage account
+kv-lz-prod-uks-01        # Key Vault
+law-lz-prod-uks-01       # Log Analytics Workspace
+pip-fw-prod-uks-01       # Public IP for firewall
+vhub-lz-prod-uks-01      # Virtual Hub
+udr-spoke-prod-uks-01    # User-defined route table
+nic-db-prod-uks-01       # Network interface
+vm-app-prod-uks-01       # Virtual machine
+```
+
+### Naming Rules
+
+- Use lowercase alphanumeric characters and hyphens only.
+- Instance numbers start at `01` and increment for additional instances of the same resource type.
+- For resources that span multiple tiers or purposes within a workload, extend the workload component with a suffix:
+  - `nsg-db-prod-uks-01` (database tier NSG)
+  - `nsg-app-prod-uks-01` (application tier NSG)
+  - `snet-db-prod-uks-01` (database subnet)
+  - `snet-app-prod-uks-01` (application subnet)
+- Centralize naming logic in `locals.tf` using `local.names` map to ensure consistency.
+- All resource names are stored in `locals.tf` as computed values and referenced via `local.names.<resource_type>` in resource declarations.
+
+### Name-Length Validation
+
+Enforce Azure resource name-length constraints with `lifecycle` preconditions in resources that have hard limits:
+- **Key Vault:** 24 characters max
+- **Storage Account:** 24 characters max
+- **DNS zones, App Service names, container registries:** 63 characters max
+
+Example validation in a resource:
+
+```hcl
+lifecycle {
+  precondition {
+    condition     = length(local.names.key_vault) <= 24
+    error_message = "Key Vault name '${local.names.key_vault}' exceeds 24 characters. Reduce workload, environment, or location code length."
+  }
+}
+```
 
 ## Authoring Rules
 
