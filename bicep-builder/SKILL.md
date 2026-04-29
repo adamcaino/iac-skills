@@ -109,6 +109,9 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
 - Do not hide critical security or reliability settings behind unexplained defaults.
 - Do not rely on implicit truncation or guesswork for Azure naming constraints; enforce limits using parameter decorators and, when enabled, assertions.
 - Do not centralize all private endpoints in a shared `private-endpoints.bicep` module when endpoints are tightly tied to specific resources.
+- Do not set `publicNetworkAccess: 'Enabled'` for data-plane services such as Storage, Key Vault, Azure AI Services, or Azure ML unless the user explicitly requests temporary public exposure.
+- Do not treat a landing zone as complete when required private endpoints and private DNS zone links are missing for private-only data-plane services.
+- Do not hard-code a single environment or region in generated templates unless the user explicitly requests a single-environment or single-region artifact.
 
 ## Name-Length Pre-Validation Requirements
 
@@ -162,6 +165,14 @@ Every generated Bicep workload should be reasoned against these pillars.
 - Use private networking, network security groups, and least-privilege role assignments where appropriate.
 - Store secrets in Azure Key Vault instead of plain-text parameter values when runtime secrets are involved.
 - Enable encryption, secure transfer, and service hardening settings by default unless the user directs otherwise.
+
+### Security Baseline For MSP Offerings
+
+- Default to private-only data-plane access for Storage, Key Vault, and Azure AI Services.
+- Set `publicNetworkAccess: 'Disabled'` by default for those services and require an explicit user override to enable public access.
+- Place private endpoints in the same resource-family module as the parent service and link to the corresponding private DNS zones.
+- Include subnet-level NSG association and route table association for app and platform subnets unless the user explicitly opts out.
+- For Key Vault, preserve `enableRbacAuthorization: true` and avoid access policy sprawl in generated examples.
 
 ### Cost Optimization
 
@@ -329,6 +340,8 @@ Use these default mappings when choosing module names.
 
 If a requested resource family is not listed, create a new kebab-case module that matches the resource type, such as `modules/application-gateways.bicep` or `modules/container-registries.bicep`.
 
+When private endpoints are used, include the DNS zone family module by default and wire zone groups from each private endpoint to the right zone.
+
 ## Authoring Rules
 
 - Keep naming and tags consistent through shared variables.
@@ -340,12 +353,15 @@ If a requested resource family is not listed, create a new kebab-case module tha
 - Use deterministic RBAC assignment naming, such as `guid(scopeResourceId, principalId, roleSeed)`, to keep role assignments idempotent.
 - Set `principalType` explicitly in role assignments when known.
 - In diagnostics modules, model target resources as `existing` and apply `Microsoft.Insights/diagnosticSettings` at resource scope.
+- Prefer stable `Microsoft.Insights/diagnosticSettings` API versions; use preview only when required by the target resource and document why.
+- Prefer explicit diagnostic categories per service when known; use broad category groups only when category discovery is unavailable.
 - Add blank lines between logical groups so metadata, service configuration, nested objects, tags, and guardrails are visually distinct.
 - Create a short `README.md` for generated solutions that explains the repository layout, purpose of each module, and the main architectural decisions.
 - Do not embed ADR authoring logic in this skill; use the `adr-generator` skill for ADR creation and structure.
 - Do not include local deployment commands, manual deployment steps, or workstation setup instructions in the README; assume delivery occurs through CI/CD pipelines.
 - Add brief comments only when the intent is not obvious from the code.
 - If the user asks for a single-file example, explain that the preferred repository convention is still split by resource family and only collapse files if explicitly required.
+- Keep template portability by default: allow multiple environments and regions using parameter `@allowed` lists unless the user explicitly asks to pin to one.
 
 ## Example Response Shape
 
@@ -387,3 +403,9 @@ Before finishing, verify all of the following:
 - Deployment fails early with clear validation messages when generated names exceed limits.
 - Security, monitoring, tagging, and operational settings are not omitted for convenience.
 - The design is consistent with the Microsoft Well-Architected Framework.
+- Public data-plane access is disabled by default for Storage, Key Vault, and Azure AI Services unless explicitly requested.
+- Private endpoints and private DNS links are present for private-only data-plane services.
+- Subnets used by workloads and private endpoints include NSG and route-table associations unless explicitly waived.
+- Diagnostic settings are configured for critical services and target Log Analytics.
+- Diagnostics API versions are stable where possible, and preview use is justified when unavoidable.
+- Region and environment parameterization remains reusable unless a deliberate single-scope template was requested.
