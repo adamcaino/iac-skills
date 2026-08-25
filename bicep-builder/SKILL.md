@@ -21,11 +21,18 @@ Use this skill when creating or restructuring Bicep for Azure workloads that sho
 
 Do not place all resources in `main.bicep`.
 
-Use this file layout by default unless the user explicitly requests a different structure:
+Use this file layout by default unless the user explicitly requests a different structure. For environment-driven platform landing zones, keep network and tag JSON under `config/`, environment parameter files under `params/`, and generated `env.*.json` ARM parameter build files under `builds/`:
 
 ```text
 main.bicep
 main.bicepparam
+config/
+	network.<environment>.json
+	tags.<environment>.json
+params/
+	env.<environment>.bicepparam
+builds/
+	env.<environment>.json
 modules/
 	naming.bicep
 	resource-groups.bicep
