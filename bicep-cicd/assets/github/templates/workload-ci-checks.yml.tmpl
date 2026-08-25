@@ -1,0 +1,39 @@
+# Template: .github/workflows/templates/workload-ci-checks.yml
+name: workload-ci-checks
+
+on:
+  workflow_call:
+    inputs:
+      workload_path:
+        required: true
+        type: string
+
+jobs:
+  validate:
+    name: Bicep lint and build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Bicep lint
+        shell: bash
+        run: |
+          set -euo pipefail
+          main_bicep="${{ inputs.workload_path }}/main.bicep"
+          if [[ ! -f "${main_bicep}" ]]; then
+            echo "Expected file not found: ${main_bicep}"
+            exit 1
+          fi
+          az bicep lint --file "${main_bicep}"
+
+      - name: Bicep build
+        shell: bash
+        run: |
+          set -euo pipefail
+          az bicep build --file "${{ inputs.workload_path }}/main.bicep"

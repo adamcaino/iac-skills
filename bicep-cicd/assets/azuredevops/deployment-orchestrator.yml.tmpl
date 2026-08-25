@@ -1,0 +1,22 @@
+# Template: .azuredevops/deploy-<token>-<workload>.yml
+trigger: none
+pr: none
+
+variables:
+  - name: serviceConnection
+    value: <ado-service-connection-name>
+  - name: deploymentLocation
+    value: uksouth
+
+stages:
+  - template: templates/deploy-workload-stage.yml
+    parameters:
+      environmentName: dev
+      workloadPath: <workload-root>
+      parameterFile: <workload-root>/params/env.dev.bicepparam
+
+  - template: templates/deploy-workload-stage.yml
+    parameters:
+      environmentName: prd
+      workloadPath: <workload-root>
+      parameterFile: <workload-root>/params/env.prod.bicepparam

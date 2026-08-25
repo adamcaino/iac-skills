@@ -1,0 +1,40 @@
+# Template: .azuredevops/templates/deploy-workload-stage.yml
+parameters:
+  - name: environmentName
+    type: string
+  - name: workloadPath
+    type: string
+  - name: parameterFile
+    type: string
+
+stages:
+  - stage: deploy_${{ replace(parameters.environmentName, '-', '_') }}
+    displayName: Deploy ${{ parameters.environmentName }}
+    jobs:
+      - deployment: bicep_deploy_${{ replace(parameters.environmentName, '-', '_') }}
+        displayName: Deploy Bicep (${{ parameters.environmentName }})
+        environment: ${{ parameters.environmentName }}
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - task: AzureCLI@2
+                  displayName: Deploy subscription-scope Bicep Deployment Stack
+                  inputs:
+                    azureSubscription: $(serviceConnection)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      set -euo pipefail
+
+                      workload_slug="$(echo '${{ parameters.workloadPath }}' | tr '/_' '-')"
+                      stack_name="${workload_slug}-${{ parameters.environmentName }}"
+
+                      az stack sub create \
+                        --name "${stack_name}" \
+                        --location "$(deploymentLocation)" \
+                        --template-file "${{ parameters.workloadPath }}/main.bicep" \
+                        --parameters "${{ parameters.parameterFile }}" \
+                        --action-on-unmanage delete \
+                        --yes

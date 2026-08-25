@@ -1,0 +1,30 @@
+# Template: .azuredevops/templates/workload-ci-checks.yml
+parameters:
+  - name: workloadPath
+    type: string
+
+jobs:
+  - job: bicep_validation
+    displayName: Bicep lint and build
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+      - checkout: self
+
+      - bash: |
+          # Fail fast on command, unset variable, or pipeline errors.
+          set -euo pipefail
+
+          main_bicep="${{ parameters.workloadPath }}/main.bicep"
+          if [[ ! -f "${main_bicep}" ]]; then
+            echo "Expected file not found: ${main_bicep}"
+            exit 1
+          fi
+          az bicep lint --file "${main_bicep}"
+        displayName: Bicep lint main.bicep
+
+      - bash: |
+          # Fail fast on command, unset variable, or pipeline errors.
+          set -euo pipefail
+          az bicep build --file "${{ parameters.workloadPath }}/main.bicep"
+        displayName: Bicep build main.bicep
