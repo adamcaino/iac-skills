@@ -1,0 +1,14 @@
+# Template: .github/workflows/ci-<workload>.yml
+name: ci-<workload>
+
+on:
+  pull_request:
+    paths:
+      - <workload-root>/**
+
+jobs:
+  validate:
+    uses: ./.github/workflows/templates/workload-ci-checks.yml
+    secrets: inherit
+    with:
+      workload_path: <workload-root>

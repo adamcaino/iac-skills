@@ -1,0 +1,23 @@
+# Template: .github/workflows/deploy-<token>-<workload>.yml
+name: deploy-<token>-<workload>
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy_dev:
+    uses: ./.github/workflows/templates/deploy-workload.yml
+    secrets: inherit
+    with:
+      environment_name: dev
+      workload_path: <workload-root>
+      parameter_file: <workload-root>/params/env.dev.bicepparam
+
+  deploy_prd:
+    needs: deploy_dev
+    uses: ./.github/workflows/templates/deploy-workload.yml
+    secrets: inherit
+    with:
+      environment_name: prd
+      workload_path: <workload-root>
+      parameter_file: <workload-root>/params/env.prod.bicepparam
