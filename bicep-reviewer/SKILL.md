@@ -125,7 +125,7 @@ When asked to review Bicep, follow this sequence:
 6. Provide a prioritized remediation plan with effort sizing.
 7. Include residual risks and testing gaps.
 8. If export formats are requested, invoke the `iac-audit-output` skill to emit JSON, Markdown, and CSV from the same canonical findings set.
-9. When the user requests a Markdown export, write the complete audit report to `bicep-review-findings.md` at the repository root unless a different path is explicitly requested. Preserve the standardized audit section order and canonical findings used in the response.
+9. Always write the complete audit report to `bicep-review-findings.md` at the repository root, in addition to presenting it in the chat response, unless a different path is explicitly requested. Preserve the standardized audit section order and canonical findings used in the file and the response.
 
 ## Hard Prohibitions
 
@@ -144,3 +144,4 @@ Before finishing, verify all of the following:
 - Assumptions and open questions are explicit.
 - Residual risks and testing gaps are included.
 - Output follows the standardized audit contract.
+- The complete audit report has been written to a root-level Markdown file (default `bicep-review-findings.md`) in addition to the chat response.
