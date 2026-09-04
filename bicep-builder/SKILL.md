@@ -6,7 +6,7 @@ argument-hint: 'Describe the Azure workload, resource types, environment, and an
 
 # Azure Bicep Workload Builder
 
-Use this skill when creating or restructuring Bicep for Azure workloads that should align to the Microsoft Well-Architected Framework and follow a strict file decomposition model.
+Use this skill when creating or restructuring Bicep for Azure workloads that should align to the Microsoft Well-Architected Framework and follow a strict file decomposition model. The model supports both a single deployable workload root and multiple independently deployable sub-workload roots, such as `workloads/lims-data` and `workloads/lims-avd`.
 
 ## Primary Outcomes
 
@@ -14,45 +14,71 @@ Use this skill when creating or restructuring Bicep for Azure workloads that sho
 - Apply Microsoft Well-Architected Framework guidance across security, reliability, cost optimization, operational excellence, and performance efficiency.
 - Reserve `main.bicep` for orchestration and module wiring rather than collapsing all resources into it.
 - Generate a short `README.md` that explains file structure, module boundaries, and architectural intent without including local deployment steps.
-- Delegate ADR authoring to the `adr-generator` skill so Bicep authoring and architecture documentation remain decoupled.
+- Delegate ADR authoring to the `adr-generator` skill so Bicep authoring and architecture documentation remain decoupled; store the resulting ADRs under `ADRs/` in the affected workload root.
 - Question the user about workload intent, critical requirements, and constraints before generating code to ensure the design is fit for purpose.
 
 ## Non-Negotiable File Framework
 
 Do not place all resources in `main.bicep`.
 
-Use this file layout by default unless the user explicitly requests a different structure. For environment-driven platform landing zones, keep network and tag JSON under `config/`, environment parameter files under `params/`, and generated `env.*.json` ARM parameter build files under `builds/`:
+Use this file layout by default unless the user explicitly requests a different structure. A repository may contain one workload root or several independently deployable sibling roots under `bicep/workloads/`, named for lifecycle or domain purpose, such as `bicep/workloads/lims-data/` and `bicep/workloads/lims-avd/`. Keep each deployable root self-contained. For environment-driven workloads, keep configuration JSON under `config/`, environment parameter files under `params/`, generated `env.*.json` ARM parameter build files under `builds/`, and material architecture decisions under `ADRs/`:
 
 ```text
-main.bicep
-main.bicepparam
-config/
-	network.<environment>.json
-	tags.<environment>.json
-params/
-	env.<environment>.bicepparam
-builds/
-	env.<environment>.json
-modules/
-	naming.bicep
-	resource-groups.bicep
-	virtual-networks.bicep
-	network-security-groups.bicep
-	route-tables.bicep
-	virtual-machines.bicep
-	managed-disks.bicep
-	storage-accounts.bicep
-	key-vaults.bicep
-	observability.bicep
-	diagnostic-settings.bicep
-	role-assignments.bicep
+bicep/
+	workloads/
+		<workload>-<domain>/
+			README.md
+			main.bicep
+			ADRs/
+				001-<decision>.md
+			builds/
+				env.<environment>.json
+			config/
+				network.<environment>.json
+				tags.<environment>.json
+			modules/
+				<resource-family>.bicep
+			params/
+				env.<environment>.bicepparam
+				or <region>-<environment>.bicepparam
+		<workload>-<sub-workload>/
+			README.md
+			main.bicep
+			ADRs/
+			builds/
+			config/          # omit when no JSON configuration is needed
+			modules/
+			params/
+platform/
+		main.bicep
+		...
 ```
+
+### Folder Presence Rules
+
+- `main.bicep`, `modules/`, `params/`, `README.md`, and `ADRs/` are the default workload-root structure.
+- Create `config/` only when the workload needs external JSON configuration such as network profiles, tag maps, or service settings. Do not create an empty folder.
+- Create `builds/` for environment-driven parameter files and place generated ARM parameter artifacts there. Treat files under `builds/` as generated validation/deployment artifacts; never hand-edit them as the source of truth.
+- Store material architecture decisions under `ADRs/` using sequential, descriptive filenames. Use the `adr-generator` skill and create an ADR for split deployment roots, notable AVM gaps, deliberate security exceptions, or other decisions future engineers need to understand.
+- Keep `README.md` in every deployable root. It must describe the root's scope, module boundaries, folder layout, cross-root dependencies, and major architectural decisions. Do not include workstation or manual deployment instructions.
+- If a root is split into sub-workloads, each sub-workload must have its own `main.bicep`, `params/`, `builds/`, and lifecycle-specific `modules/`. Do not leave resources or parameter contracts in an obsolete parent root.
+
+### Sub-Workload Boundaries
+
+- Split into independently deployable roots when resource groups have materially different change cadence, approval requirements, ownership, or deletion blast radius.
+- Keep tightly coupled resources together when one resource directly configures or protects another and splitting would create unnecessary cross-stack coordination. For example, keep a SQL VM and its backup vault together, while placing AVD control-plane resources and AVD-specific FSLogix storage in an AVD root when that matches operational ownership.
+- Treat each root as a separate deployment stack. Pass cross-root dependencies as resource ID parameters or existing-resource references; do not rely on outputs from a separately deployed root to construct compile-time module scopes.
+- Name roots by lifecycle or domain purpose, such as `lims-data` and `lims-avd`, rather than by arbitrary file order.
 
 ### File Naming Rules
 
 - `main.bicep`: only parameters, shared variables, module declarations, and outputs used to compose the solution.
-- `main.bicepparam`: environment values and deployment-time parameter bindings.
+- `main.bicepparam`: environment values and deployment-time parameter bindings when a single parameter file is sufficient.
 - `modules/<resource-family-plural>.bicep`: declare resources for a single Azure resource family.
+- `params/<environment>.bicepparam` or `params/<region>-<environment>.bicepparam`: environment-specific bindings for a deployable root. Prefer the region-environment form when the same root supports multiple regions.
+- `builds/env.<environment>.json`: generated ARM parameter output from the corresponding `.bicepparam`; regenerate it after parameter changes and do not use it as the authoring source.
+- `config/<purpose>.<environment>.json`: external JSON configuration loaded by `.bicepparam` or Bicep. Keep secrets out of these files.
+- `ADRs/<nnn>-<decision>.md`: one material architecture decision per file, generated through the ADR workflow.
 - Use kebab-case module names for resource families, such as `virtual-networks.bicep`, `virtual-machines.bicep`, `storage-accounts.bicep`, and `key-vaults.bicep`.
 - Declare private endpoints in the same module as the resource they connect to. For example, a storage private endpoint belongs in `modules/storage-accounts.bicep`, and a Key Vault private endpoint belongs in `modules/key-vaults.bicep`.
 - If a resource family becomes too large, split within the same family using a clear suffix, such as `virtual-machines-linux.bicep` and `virtual-machines-windows.bicep`.
@@ -205,21 +231,23 @@ Every generated Bicep workload should be reasoned against these pillars.
 When asked to build Bicep, follow this sequence.
 
 1. Identify the Azure services involved and group them into resource families.
-2. Create `main.bicep` first with target scope, shared parameters, module orchestration, and outputs.
-3. Create `main.bicepparam` for environment bindings.
-4. Create one module file per resource family under `modules/`.
-5. Place private endpoints with the resource family they expose rather than in a centralized module.
-6. Add outputs only for values that need to be consumed externally.
-7. Create a short `README.md` that explains file structure, module boundaries, and major design choices.
-8. Invoke the `adr-generator` skill to produce ADRs for material design decisions.
-9. Exclude local deployment instructions and assume deployment is handled by CI/CD pipelines.
-10. Review the generated design against the Well-Architected pillars before finishing.
+2. Decide whether the solution is one deployable root or multiple sub-workload roots based on ownership, change cadence, approval gates, and deletion blast radius. Record a split decision in `ADRs/`.
+3. Create each root's `main.bicep` with target scope, shared parameters, module orchestration, and outputs.
+4. Create `params/` parameter files for every supported environment and region. Use `config/` for non-secret JSON inputs when needed.
+5. Create one module file per resource family under each root's `modules/` folder.
+6. Place private endpoints with the resource family they expose rather than in a centralized module.
+7. Add outputs only for values that need to be consumed externally or passed across a root boundary. Prefer resource ID parameters for separately deployed roots.
+8. Create a short `README.md` in every root that explains scope, file structure, module boundaries, cross-root dependencies, and major design choices.
+9. Invoke the `adr-generator` skill to produce ADRs for material design decisions and store them under the affected root's `ADRs/` folder.
+10. Generate `builds/env.<environment>.json` from every `.bicepparam` file using `az bicep build-params`; do not hand-author generated build artifacts.
+11. Exclude local deployment instructions and assume deployment is handled by CI/CD pipelines.
+12. Review the generated design against the Well-Architected pillars before finishing.
 
 ## Bicep Compilation and Validation Requirements
 
 Before delivering the Bicep code to the user, execute the following validation steps to ensure the generated configuration is correct and ready for deployment:
 
-1. **Compile each Bicep file:**
+1. **Compile each Bicep file in every deployable root:**
 	```bash
 	bicep build <filename>.bicep
 	```
@@ -229,13 +257,19 @@ Before delivering the Bicep code to the user, execute the following validation s
 	```
 	This compiles the Bicep template to ARM JSON and validates syntax and resource declarations.
 
-2. **Compile main.bicep last to verify module orchestration:**
+2. **Build every parameter file into its matching `builds/` artifact:**
+	```bash
+	az bicep build-params --file params/<region>-<environment>.bicepparam --outfile builds/env.<environment>.json
+	```
+	This validates environment bindings and keeps generated parameter artifacts synchronized with their source files.
+
+3. **Compile each `main.bicep` last within its root to verify module orchestration:**
 	```bash
 	bicep build main.bicep
 	```
 	This ensures all module references, outputs, and compositions are valid.
 
-3. **Both commands must complete successfully** with exit code 0 before declaring the task complete.
+4. **All module builds, parameter builds, and root `main.bicep` builds must complete successfully** with exit code 0 before declaring the task complete. Warnings must be reviewed and either resolved or documented as accepted residual risk.
 
 ### Compilation Failures
 
@@ -375,21 +409,18 @@ When private endpoints are used, include the DNS zone family module by default a
 When producing Bicep, explain the resulting file layout before presenting code.
 
 ```text
-main.bicep
-	- parameters and variables
-	- module orchestration
-	- outputs
+bicep/workloads/<workload>/
+	- main.bicep: parameters, variables, module orchestration, outputs
+	- README.md: scope, boundaries, and architectural intent
+	- ADRs/: material architecture decisions
+	- builds/: generated ARM parameter artifacts
+	- config/: optional environment JSON configuration
+	- params/: environment or region-environment parameter files
+	- modules/: resource-family modules
 
-main.bicepparam
-	- environment-specific parameter values
-
-modules/virtual-networks.bicep
-	- virtual network
-	- subnets
-
-modules/virtual-machines.bicep
-	- network interfaces
-	- virtual machines
+bicep/workloads/<sub-workload>/
+	- independent main.bicep and lifecycle-specific modules
+	- separate params/, builds/, config/, ADRs/, and README.md
 ```
 
 ## Review Checklist
@@ -397,6 +428,7 @@ modules/virtual-machines.bicep
 Before finishing, verify all of the following:
 
 - No catch-all `main.bicep` file was used.
+- Each independently deployed root is self-contained and has its own lifecycle-specific `main.bicep`, `params/`, `builds/`, `modules/`, `README.md`, and `ADRs/` structure.
 - `main.bicep` contains composition concerns only.
 - Each resource family is isolated into an appropriately named module.
 - Private endpoints are declared beside their parent resources rather than in a centralized private-endpoints module.
@@ -406,6 +438,9 @@ Before finishing, verify all of the following:
 - Resource properties are grouped with intentional blank lines so metadata, configuration, nested properties, tags, and guardrails are easy to review.
 - A short `README.md` exists and explains file structure and major architectural choices.
 - ADRs are generated via the `adr-generator` skill and stored under `ADRs/`.
+- `config/` exists only when external JSON configuration is required; secrets are not stored there.
+- Every source `.bicepparam` file has a matching generated artifact under `builds/`, and generated artifacts were rebuilt after parameter changes.
+- README files, ADRs, parameter files, and generated build artifacts agree on which root owns each resource family.
 - The README does not include local deployment instructions and assumes CI/CD-driven delivery.
 - Deployment fails early with clear validation messages when generated names exceed limits.
 - Security, monitoring, tagging, and operational settings are not omitted for convenience.
