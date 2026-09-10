@@ -1,62 +1,58 @@
 # Pipeline Conventions
 
-This reference defines concrete generation conventions for the `bicep-cicd` skill.
+Concrete generation conventions for the `bicep-cicd` skill — file placement, naming, and pipeline behavior. Load this before generating any pipeline file.
 
 ## Discovery
 
 - Workloads are discovered from all `main.bicep` files.
 - Workload root is the parent folder of each `main.bicep` file.
-- Workload name token is the workload root folder name.
+- Workload name token (`<workload>`) is the workload root folder name, e.g. `bicep/platform/main.bicep` -> `<workload>` is `platform`.
 
-## Naming
+## Naming Defaults
 
-- Deployment file name: `deploy-<token>-<workload>.yml`
-- Workload CI file name: `ci-<workload>.yml`
+- Deployment pipeline: `deploy-<token>-<workload>.yml`
+- Workload CI pipeline: `ci-<workload>.yml`
+- `<token>` is `platform` or `application`. If the workload path does not clearly indicate which, ask the user before generating deployment files.
 
-`<token>` must be one of:
-- `platform`
-- `application`
+## Other Defaults
 
-If token cannot be inferred, ask the user.
+- Environments: `dev`, `prd` — when parameter files use `prod` naming in-repo, map `prd` deployment to `env.prod.bicepparam`.
+- CI trigger: PR only, scoped to the workload path. No default push trigger unless the user asks.
+- Production approvals: rely on platform-native environment approvals (Azure DevOps Environments approvals/checks, GitHub Environments protection rules). Do not generate inline manual approval jobs unless explicitly requested.
 
-## Defaults
+## Placement Rules
 
-- Environments: `dev`, `prd`
-- CI trigger mode: PR only
-- Production approval: environment-level controls
+### Azure DevOps flavour
 
-## Azure DevOps Generation
+Deployment and shared templates go in `.azuredevops/`; workload CI pipelines sit next to each workload's `main.bicep`.
 
-Required folders/files:
-- `.azuredevops/templates/workload-ci-checks.yml`
-- `.azuredevops/templates/deploy-workload-stage.yml`
-- `.azuredevops/deploy-<token>-<workload>.yml`
-- `<workload-root>/ci-<workload>.yml`
+```text
+.azuredevops/deploy-<token>-<workload>.yml
+.azuredevops/templates/workload-ci-checks.yml
+.azuredevops/templates/deploy-workload-stage.yml
+<workload-root>/ci-<workload>.yml
+```
 
-## GitHub Generation
+### GitHub flavour
 
-Required folders/files:
-- `.github/workflows/templates/workload-ci-checks.yml`
-- `.github/workflows/templates/deploy-workload.yml`
-- `.github/workflows/deploy-<token>-<workload>.yml`
-- `.github/workflows/ci-<workload>.yml`
+Deployment and shared templates go in `.github/`. Per this repository's convention, integration workflows stay in `.github/workflows/` (not next to `main.bicep`).
 
-Note for this repository:
-- CI workflows stay in `.github/workflows/` by explicit user decision.
+```text
+.github/workflows/deploy-<token>-<workload>.yml
+.github/workflows/templates/workload-ci-checks.yml
+.github/workflows/templates/deploy-workload.yml
+.github/workflows/ci-<workload>.yml
+```
 
-## CI Behavior
+## Workload CI Pipeline Behavior
 
-- No deployment jobs.
-- Must run bicep lint and build checks against `<workload-root>/main.bicep`.
-- Must run lint and build in separate tasks.
-- Must use strict Bash mode (`set -euo pipefail`) in CI Bash steps.
-- For Azure DevOps Bash steps, include a concise comment above each `set -euo pipefail` line.
-- Should include path filters scoped to workload root.
+- Reuse shared CI templates from `.azuredevops/templates` or `.github/workflows/templates`.
+- Run lint-and-build-only validation against the workload's `main.bicep` — lint and build as separate tasks, no deployment/release stages.
+- Use strict Bash mode (`set -euo pipefail`) in generated check steps; for Azure DevOps Bash steps, include a concise comment above each `set -euo pipefail` line.
+- Minimum checks: `az bicep lint --file <path>/main.bicep` (or equivalent) and `az bicep build --file <path>/main.bicep`.
 
-## Deployment Behavior
+## Deployment Pipeline Behavior
 
-- Orchestrator pipeline references shared templates.
-- Environment order is `dev` then `prd` by default.
-- Environment approvals are externalized to platform environment configuration.
-- Azure DevOps deployments use Deployment Stacks with `az stack sub create`.
-- Unmanaged resources policy is `--action-on-unmanage delete`.
+- Orchestrated by a master deployment file per workload, reusing deployment stage/job templates.
+- Deploy in environment order (`dev` then `prd` by default), using environment resources for approvals and checks.
+- Use Deployment Stacks (`az stack sub create`) for the Azure DevOps flavour, with unmanaged resources policy `--action-on-unmanage delete`.
