@@ -6,7 +6,9 @@ argument-hint: 'Describe the audit findings source, requested output formats (js
 
 # IaC Audit Output Formatter
 
-Use this skill to transform review findings into consistent JSON, Markdown, and CSV outputs for automation, customer reporting, and analytics systems.
+Transform review findings into consistent JSON, Markdown, and CSV outputs for automation, customer reporting, and analytics systems.
+
+Load `references/format-rules.md` for the concrete JSON/Markdown/CSV output rules — read only the section(s) for the format(s) actually being produced, not all three every time.
 
 ## Primary Outcomes
 
@@ -73,71 +75,14 @@ All exports must map to this canonical shape:
 
 Severity order is mandatory: `critical`, `high`, `medium`, `low`.
 
-## JSON Output Rules
-
-- Emit valid JSON with deterministic key ordering.
-- Do not omit empty arrays; use empty arrays for missing sections.
-- Keep data typed, with arrays for list sections.
-- Use ISO-8601 UTC timestamps.
-
-Minimum JSON top-level keys:
-
-```json
-{
-  "report_id": "string",
-  "generated_at_utc": "2026-03-28T10:00:00Z",
-  "tool_source": "terraform-reviewer",
-  "scope_summary": {
-    "scope": "string",
-    "baseline": "string",
-    "exclusions": []
-  },
-  "findings": [],
-  "open_questions": [],
-  "assumptions": [],
-  "remediation_plan": [],
-  "residual_risks": [],
-  "test_gaps": []
-}
-```
-
-## Markdown Output Rules
-
-- Use this section order:
-  1. Scope Summary
-  2. Findings
-  3. Open Questions and Assumptions
-  4. Remediation Plan
-  5. Residual Risks and Test Gaps
-- Group findings by severity with stable identifiers.
-- Include location references and effort estimates in each finding.
-- Keep wording client-readable and free of tool-internal jargon.
-
-## CSV Output Rules
-
-- One row per finding.
-- UTF-8, comma-delimited, header required.
-- Quote fields that may contain commas or line breaks.
-- Keep column names stable across all reports.
-
-Required CSV columns:
-
-`report_id,generated_at_utc,tool_source,severity,id,category,pillar,location,issue,risk,recommendation,effort,scope,baseline`
-
-Optional columns:
-
-`client,environment,reviewer,assessment_date,tags`
-
 ## Delivery Pattern
 
 When asked to produce exports, follow this sequence:
 
 1. Normalize findings into the canonical model.
 2. Sort findings by severity and stable ID.
-3. Generate JSON export.
-4. Generate Markdown export from the same source model.
-5. Generate CSV export from findings.
-6. Validate that counts and IDs match across all formats.
+3. For each requested format, load its section of `references/format-rules.md` and generate the export from the same source model.
+4. Validate that counts and IDs match across all formats.
 
 ## Cross-Format Consistency Checks
 
