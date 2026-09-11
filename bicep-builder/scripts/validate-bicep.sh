@@ -1,37 +1,49 @@
 #!/usr/bin/env bash
-# Validates all Bicep modules, workload roots, and parameter files under a
-# bicep/workloads tree. Builds shared modules, then each root's main.bicep,
-# then every .bicepparam file into its matching builds/env.<env>.json.
+# Validates all Bicep modules, platform/workload roots, and parameter files under
+# a bicep tree. Builds shared modules, then each root's main.bicep, then every
+# .bicepparam file into its matching builds/env.<env>.json.
 #
 # Usage: ./validate-bicep.sh [root-path]
-#   root-path defaults to bicep/workloads
+#   root-path defaults to bicep (or current directory if bicep/ does not exist)
 
 set -euo pipefail
 
-ROOT="${1:-bicep/workloads}"
+TARGET="${1:-}"
+if [ -z "$TARGET" ]; then
+	if [ -d "bicep" ]; then
+		TARGET="bicep"
+	elif [ -d "workloads" ]; then
+		TARGET="."
+	else
+		TARGET="."
+	fi
+fi
+
 FAIL=0
 
 echo "== Building shared modules =="
-if [ -d "$ROOT/modules" ]; then
-	for f in "$ROOT"/modules/*.bicep; do
-		[ -e "$f" ] || continue
-		echo "-- $f"
-		az bicep build --file "$f" || FAIL=1
-	done
-else
-	echo "(no modules/ folder found under $ROOT)"
+module_found=0
+while IFS= read -r mod_file; do
+	[ -n "$mod_file" ] || continue
+	module_found=1
+	echo "-- $mod_file"
+	az bicep build --file "$mod_file" || FAIL=1
+done < <(find "$TARGET" -path "*/modules/*.bicep" -not -path "*/.*/*" | sort)
+
+if [ "$module_found" -eq 0 ]; then
+	echo "(no shared modules found under $TARGET)"
 fi
 
-echo "== Building workload roots =="
-for main in "$ROOT"/*/main.bicep; do
-	[ -e "$main" ] || continue
-	echo "-- $main"
-	az bicep build --file "$main" || FAIL=1
-done
+echo "== Building platform and workload roots =="
+while IFS= read -r main_file; do
+	[ -n "$main_file" ] || continue
+	echo "-- $main_file"
+	az bicep build --file "$main_file" || FAIL=1
+done < <(find "$TARGET" -name "main.bicep" -not -path "*/modules/*" -not -path "*/.*/*" | sort)
 
 echo "== Building parameter files =="
-for params_dir in "$ROOT"/*/params; do
-	[ -d "$params_dir" ] || continue
+while IFS= read -r params_dir; do
+	[ -n "$params_dir" ] || continue
 	root_dir="$(dirname "$params_dir")"
 	builds_dir="$root_dir/builds"
 	mkdir -p "$builds_dir"
@@ -42,7 +54,7 @@ for params_dir in "$ROOT"/*/params; do
 		echo "-- $pf -> $outfile"
 		az bicep build-params --file "$pf" --outfile "$outfile" || FAIL=1
 	done
-done
+done < <(find "$TARGET" -type d -name "params" -not -path "*/.*/*" | sort)
 
 if [ "$FAIL" -ne 0 ]; then
 	echo "" >&2
