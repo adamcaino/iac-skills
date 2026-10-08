@@ -1,178 +1,158 @@
 ---
 name: terraform-builder
-description: 'Create Terraform workloads for Microsoft Azure using the Microsoft Well-Architected Framework. Use when generating or refactoring Terraform, Azure landing zones, platform services, workload infrastructure, or IaC repositories that must use main.tf for Terraform and provider configuration plus resource-specific .tf files such as virtual_networks.tf, virtual_machines.tf, storage_accounts.tf, and key_vaults.tf instead of placing all resources into a monolithic main.tf.'
+description: 'Create Terraform for Azure landing zones, platform services, and workloads aligned to the Microsoft Well-Architected Framework. Use when generating or refactoring Terraform IaC into main.tf for Terraform/provider configuration plus resource-family files (virtual_networks.tf, key_vaults.tf, etc.) instead of a monolithic main.tf.'
 argument-hint: 'Describe the Azure workload, resource types, environment, and any naming, security, networking, or backend requirements.'
 ---
 
 # Azure Terraform Workload & Platform Builder
 
-Create or restructure Terraform for Azure workloads and platform services aligned to the Microsoft Well-Architected Framework, using a strict file decomposition model. Supports deployable platform roots (`platform/<domain>`), workload roots (`workloads/<workload>-<domain>`), or several sibling roots.
+Create or restructure Terraform for Azure platform and workload tiers, aligned to the Well-Architected Framework (WAF), using a strict file decomposition model. Scope is Terraform IaC only. Don't produce ADRs, pipelines, or deployment guides unless the user asks for them (`adr-generator` covers ADRs).
 
-This file holds the rules needed on every task. Load a reference file only when the task needs it:
+Load `references/waf-pillars.md` only when a non-trivial design or security trade-off needs pillar reasoning. Everything else needed is in this file.
 
-- `references/naming-and-validation.md` — naming convention, name-length limits, lifecycle precondition guardrail pattern. Load when generating any resource name or variable.
-- `references/waf-pillars.md` — Well-Architected pillar guidance and MSP security baseline. Load when making a design/security trade-off, not for routine file authoring.
-- `references/style-and-examples.md` — attribute grouping and full example layouts. Load once per session if you need a formatting reference; the pattern in "Authoring Rules" below is usually enough after the first file.
-- `scripts/validate-terraform.sh` — run this, don't reason through `terraform init`/`validate` manually (see Validation below).
+## Token Economy
 
-## Primary Outcomes
+These rules apply to every step:
 
-- Terraform organised for maintenance, reviewability, and safe change isolation across Platform and Workload tiers.
-- `main.tf` holds only Terraform and provider configuration — never a catch-all.
-- Determine or infer whether the target infrastructure belongs under `platform/` or `workloads/`.
-- Delegate ADR authoring to the `adr-generator` skill; store results under `ADRs/`.
-- Ask all clarifying questions about intent, tier placement, and constraints **up front, in one batch**, before generating any code — not iteratively as you go.
-- For a large or ambiguous ask, propose the file tree first and get it confirmed before writing file contents.
+- **One clarification round, at most.** If tier, environments, regions, backend, or root split are genuinely ambiguous, ask every question in one message that also proposes the file tree. Otherwise state the assumptions and proceed. Never ask iteratively.
+- **Write, don't echo.** Create files with file tools. Never paste file contents into chat, and don't re-read files you just wrote.
+- **Generate only what's needed.** Create `.tfvars` files only for the environments and regions the user named (one if none were named). Don't add speculative resource files, outputs, `config/` files, or variables.
+- **Loop, don't repeat.** Use `for_each` over map variables or locals for repeated resources such as subnets, NSG rules, private endpoints, and role assignments. Don't write near-identical blocks. Prefer `for_each` over `count` for stable addresses.
+- **Validate once.** Run the validator after all files are written. On failure, fix only the files it names and re-run.
+- **Lean final reply.** Give the file tree, assumptions and deviations, and the validator's summary line. Don't restate code or this checklist.
 
 ## Platform vs Workload Classification
 
-Determine or infer tier alignment before structuring files:
+- **Platform (`terraform/platform/<domain>/`):** centralized foundations, shared connectivity, and landing-zone governance across workloads or subscriptions. Examples: hub VNets, Virtual WAN, Azure Firewall, Bastion, Gateway/ExpressRoute, shared Private DNS zones, central Log Analytics, policy assignments. Example roots: `platform/hub-network/`, `platform/shared-services/`.
+- **Workload (`terraform/workloads/<workload>-<domain>/`):** app-, service-, or domain-specific infrastructure. Examples: spoke subnets, UDRs, NSGs, VMs, App Service, Container Apps/AKS, Azure SQL/Cosmos DB/PostgreSQL, storage, Key Vault, workload private endpoints. Example roots: `workloads/lims-data/`, `workloads/ecommerce-web/`.
 
-- **Platform (`platform/`):** Centralized foundations, shared connectivity, and landing zone governance managed across workloads or subscriptions.
-  - *Resources:* Hub VNets, Virtual WAN, Azure Firewall, Azure Bastion, Gateway/ExpressRoute, shared Private DNS zones, centralized Log Analytics workspaces, enterprise policy assignments.
-  - *Placement:* `terraform/platform/<domain>/` (e.g. `terraform/platform/hub-network/`, `terraform/platform/shared-services/`).
-- **Workload (`workloads/`):** Application-, service-, or domain-specific infrastructure supporting discrete workloads and consumer apps.
-  - *Resources:* Workload/spoke subnets, route tables (UDRs), NSGs, Virtual Machines, App Services, Container Apps/AKS, databases (Azure SQL, Cosmos DB, PostgreSQL), storage accounts, Key Vaults, private endpoints for workload components.
-  - *Placement:* `terraform/workloads/<workload>-<domain>/` (e.g. `terraform/workloads/lims-data/`, `terraform/workloads/ecommerce-web/`).
-
-If the request is ambiguous or combines platform and workload boundaries, ask to clarify the desired tier in the initial batch of questions.
+Infer the tier when you can. Ask only if the request mixes tiers ambiguously.
 
 ## Non-Negotiable File Framework
 
 ```text
 terraform/
-	platform/
-		<domain>/
-			README.md
-			main.tf
-			locals.tf
-			variables.tf
-			outputs.tf
-			resource_groups.tf
-			virtual_networks.tf
-			firewalls.tf
-			bastion.tf
-			observability.tf
-			monitor_diagnostic_settings.tf
-			role_assignments.tf
-			ADRs/001-<decision>.md
-			config/<purpose>.<environment>.json
-			environments/<environment>.tfvars
-	workloads/
-		<workload>-<domain>/
-			README.md
-			main.tf
-			locals.tf
-			variables.tf
-			outputs.tf
-			resource_groups.tf
-			virtual_networks.tf
-			network_security_groups.tf
-			route_tables.tf
-			virtual_machines.tf
-			storage_accounts.tf
-			key_vaults.tf
-			observability.tf
-			monitor_diagnostic_settings.tf
-			role_assignments.tf
-			ADRs/001-<decision>.md
-			config/<purpose>.<environment>.json
-			environments/<environment>.tfvars
+	platform/<domain>/
+		README.md
+		main.tf
+		locals.tf
+		variables.tf
+		outputs.tf
+		<resource_family_plural>.tf
+		environments/<environment>.tfvars
+		config/<purpose>.<environment>.json
+	workloads/<workload>-<domain>/
+		(same layout as platform roots)
 ```
 
-**Folder presence:** `main.tf`, `locals.tf`, `variables.tf`, `outputs.tf`, `README.md`, `ADRs/` always exist in a deployable root. `environments/` holds `<environment>.tfvars` files. `config/` only when external JSON/YAML config is needed — never an empty folder.
+- **Folder presence:** every deployable root has `main.tf`, `locals.tf`, `variables.tf`, `outputs.tf`, and `README.md`. Create `config/` only when external JSON or YAML config is needed, and never leave it empty.
+- **`.gitignore`:** if the repo root already has one, keep it and make sure it covers the entries below. Otherwise create it with exactly these entries, and don't fetch a template:
+  - Terraform working state: `.terraform/`, `*.tfstate`, `*.tfstate.*`, `*.tfplan`
+  - Crash logs: `crash.log`, `crash.*.log`
+  - Local overrides and CLI config: `override.tf`, `override.tf.json`, `*_override.tf`, `*_override.tf.json`, `.terraformrc`, `terraform.rc`
+  - Sensitive variable files: `*.auto.tfvars`, `secrets.tfvars`
 
-**`.gitignore`:** check repo root first; preserve if present; if absent, source from standard Azure Terraform `.gitignore` (ignore `.terraform/`, `*.tfstate*`, crash logs, and sensitive `.tfvars` like `*.auto.tfvars` or `secrets.tfvars`).
-
-**Sub-workload / platform split:** split roots when resource groups differ materially in change cadence, approval requirements, ownership, or deletion blast radius. Keep tightly coupled resources together. Each root is a separate state/deployment stack — pass cross-root dependencies as resource ID variables or remote state data sources, never monolithic plans. Record the split decision in `ADRs/`.
+  Commit `.terraform.lock.hcl`.
+- **Splitting roots:** split when resource groups differ materially in change cadence, approvals, ownership, or deletion blast radius. Keep tightly coupled resources together. Each root is its own state and deployment stack. Pass cross-root dependencies as resource ID variables or remote state data sources, never as one monolithic plan. Note the split rationale in the root `README.md`.
 
 ## File Naming Rules
 
-- `main.tf`: only Terraform settings, required_version, required_providers, backend configuration, provider configuration, and provider features.
-- `locals.tf`: shared naming (`local.names` map), tags, derived IDs, and computed values reused across files.
-- `variables.tf`: cross-cutting input variables, typed objects, validation blocks, and defaults.
-- `outputs.tf`: outputs that are intentionally exposed to parent modules, downstream state, or operators.
-- `<resource-family-plural>.tf`, plural snake_case, one resource family per file (e.g. `virtual_networks.tf`). Split further with a suffix if a family grows too large (`virtual_machines_linux.tf`).
-- `environments/<environment>.tfvars` or `environments/<region>-<environment>.tfvars` — prefer the region-environment form for multi-region roots.
-- `ADRs/<nnn>-<decision>.md`: one material decision per file, via `adr-generator`.
-- Private endpoints live in the same file as the resource they connect to — never a shared `private_endpoints.tf`.
-- Keep data sources with the closest relevant resource family; if shared broadly, place them in `data_sources.tf`.
+- `main.tf` holds only the `terraform` block (`required_version`, `required_providers`, backend) and provider configuration. The `azurerm` provider always declares `features {}`.
+- `locals.tf` holds the `local.names` map, tags, derived IDs, and reused computed values.
+- `variables.tf` holds typed inputs, `validation` blocks, and defaults.
+- `outputs.tf` holds only values consumed by parent modules, downstream state, or operators.
+- Resource family files are plural snake_case, one family per file. If a family grows too large, split it with a suffix (`virtual_machines_linux.tf`). Any family not in the table below gets a new file named after the resource type.
+- Name variable files `environments/<environment>.tfvars`, or `environments/<region>-<environment>.tfvars` for multi-region roots.
+- Private endpoints live in the parent resource's file, linked to the matching private DNS zone.
+- Data sources go in the closest resource family file, or in `data_sources.tf` if they're shared broadly.
 
-### Resource Family Mapping
-
-| Azure concern | Default file |
+| Concern | File |
 |---|---|
-| Terraform and provider settings | `main.tf` |
 | Resource groups | `resource_groups.tf` |
-| Virtual networks, subnets, peering | `virtual_networks.tf` |
-| Network security groups | `network_security_groups.tf` |
-| Route tables and routes | `route_tables.tf` |
+| VNets, subnets, peering | `virtual_networks.tf` |
+| NSGs | `network_security_groups.tf` |
+| Route tables | `route_tables.tf` |
 | Private DNS zones and links | `private_dns_zones.tf` |
-| Private endpoints | colocate with parent resource file |
-| Virtual machines and NICs | `virtual_machines.tf` |
+| VMs and NICs | `virtual_machines.tf` |
 | Managed disks | `managed_disks.tf` |
-| Storage accounts and containers | `storage_accounts.tf` |
-| Key Vault and secret access model | `key_vaults.tf` |
+| Storage accounts | `storage_accounts.tf` |
+| Key Vault | `key_vaults.tf` |
+| Firewalls / Bastion | `firewalls.tf` / `bastion.tf` |
 | Log Analytics / App Insights | `observability.tf` |
 | Diagnostic settings | `monitor_diagnostic_settings.tf` |
 | Role assignments | `role_assignments.tf` |
 
-Unlisted families get a new plural snake_case file matching the resource type.
+## Resource Naming
 
-## Scope And Configuration
+Use the format `<acronym>-<workload>-<environment>-<location-code>-<instance>`, lowercase alphanumerics and hyphens only, with instance numbers starting at `01`. Example: `kv-lz-prod-uks-01`.
 
-- Provider configuration: explicitly declare `features {}` block in `azurerm` provider inside `main.tf`.
-- Sub-workload references: reference resources directly across files within the same root; pass cross-root references as variables (such as resource IDs).
-- Deterministic RBAC naming: `azurerm_role_assignment` with explicit principal_id, role_definition_name / role_definition_id, and scope.
+- **Acronyms:** `rg`, `vnet`, `snet`, `nsg`, `fw`, `st`, `kv`, `law`, `pip`, `vhub`, `udr`, `nic`, `vm`.
+- **Environments:** `prod`, `staging`, `dev`, `test`.
+- **Location codes:** `uks`, `ukw`, `euw`, `eun`, `usc`, `use`.
+- **Tiers:** add a tier suffix to the workload part where needed, e.g. `nsg-db-…` and `nsg-app-…`.
+
+Build every name in the `local.names` map and reference it as `local.names.<resource_type>`.
+
+**Length guardrails** make `terraform validate` or `plan` fail early, not inspection:
+
+- Add a `lifecycle { precondition { condition = length(local.names.x) <= N, error_message = "…" } }` block on the exact computed name the resource uses.
+- The error message must name the failing value and say what to shorten.
+
+Minimum coverage:
+
+- Key Vault: ≤ 24 characters.
+- Storage account: ≤ 24 characters, lowercase alphanumerics only.
+- DNS zones, App Service, and container registries: ≤ 63 characters.
+- Any other resource with a hard naming limit.
 
 ## Authoring Rules
 
-- Keep naming/tags in `locals.tf`. Prefer explicit names over generated ones.
-- Group resource attributes with blank lines by concern (identity → config → nested blocks → tags → lifecycle). See `references/style-and-examples.md` if you need the worked example.
-- Enforce name-length limits with `lifecycle { precondition {} }` blocks placed at the end of the resource. Full pattern: `references/naming-and-validation.md`.
-- Diagnostics: model targets using `azurerm_monitor_diagnostic_setting`, apply at resource scope, prefer explicit enabled log categories and metrics over catch-all blocks.
-- Brief comments only where intent isn't obvious from the code.
-- Template portability by default — parameterise environment, location, and SKU variables with validation blocks — unless the user explicitly asks to pin to one.
+- Group attributes with blank lines, in this order:
+  1. Identity metadata: `name`, `resource_group_name`, `location`.
+  2. Service config: `sku`, tiers, `public_network_access_enabled`, flags.
+  3. Nested blocks: `identity`, `network_acls`, `blob_properties`, `private_service_connection`, `os_disk`.
+  4. `tags` on its own.
+  5. `lifecycle` last, after `tags`.
+- Reference resources directly across files within a root. Pass cross-root references as variables, such as resource IDs.
+- Define `azurerm_role_assignment` with an explicit `principal_id`, `role_definition_name` or `role_definition_id`, and `scope`.
+- Use `azurerm_monitor_diagnostic_setting` at resource scope, with explicit log categories and metrics rather than catch-all blocks.
+- Keep roots portable: make environment, location, and SKU variables with validation blocks, unless the user asks to pin one.
+- Comment only where intent isn't obvious from the code.
 
-## Hard Prohibitions
+### Security Baseline And Prohibitions
 
-- No catch-all `main.tf`.
-- No mixing providers, networking, compute, storage, observability, and security resources without a file boundary.
-- No unexplained defaults hiding security or reliability settings.
-- No `public_network_access_enabled = true` on Storage, Key Vault, AI Services, or ML by default — explicit user request only.
-- No centralising private endpoints into a shared file when they're tightly tied to a specific resource.
-- No hard-coding a single environment/region unless explicitly requested.
-- No local deployment commands, manual apply steps, or workstation setup instructions in the README — assume CI/CD-driven delivery.
+Apply these unless the user explicitly overrides them:
+
+- Storage, Key Vault, AI Services, and ML get `public_network_access_enabled = false`.
+- Key Vault uses `rbac_authorization_enabled = true`, with no access policies.
+- App and platform subnets get an NSG and a route table, unless explicitly waived.
+- Use managed identities over secrets. Secrets never go in plain Terraform variables.
+- Send diagnostics for critical services to Log Analytics.
+- Size SKUs for the workload. Make pricing-sensitive choices variables.
+
+Never:
+
+- Write a catch-all `main.tf`.
+- Mix providers, networking, compute, storage, observability, or security without a file boundary.
+- Hide security or reliability settings behind unexplained defaults.
+- Put private endpoints in a shared file.
+- Hard-code a single environment or region unless the user asks for it.
+- Put local deployment commands, manual apply steps, or workstation setup in the README. Delivery is CI/CD-driven.
 
 ## Delivery Pattern
 
-1. Determine or infer tier alignment (**Platform** under `platform/` vs **Workload** under `workloads/`). Ask all clarifying questions in one batch (intent, tier, constraints, split vs single root, backend requirements).
-2. Identify resource families involved; decide root split (e.g. separate platform domains or workload domains); record split rationale for the ADR.
-3. Check/create `.gitignore`.
-4. Propose the file tree (specifying `platform/<domain>/` or `workloads/<workload>-<domain>/`); get confirmation before writing contents if the ask is large or ambiguous.
-5. Create `main.tf` first (Terraform block, providers, backend if specified), then `locals.tf`, then `variables.tf`.
-6. Create one `.tf` file per resource family.
-7. Place private endpoints beside their parent resource file.
-8. Add `outputs.tf` only for values consumed externally or across a root boundary.
-9. Write a short `README.md` per root (scope, file boundaries, cross-root dependencies, key decisions — no manual deployment steps).
-10. Invoke `adr-generator` for material decisions.
-11. Run `scripts/validate-terraform.sh` (see Validation below). Fix and re-run until it exits 0.
-12. Run the Review Checklist below.
+1. Infer the tier, root split, and backend. If anything is genuinely ambiguous, ask once and include the proposed tree.
+2. Check or create `.gitignore`.
+3. Write each root's files in this order: `main.tf`, `locals.tf`, `variables.tf`, one file per resource family, `outputs.tf`, then `environments/*.tfvars`.
+4. Write a short `README.md` per root, 40 lines at most. Cover scope, file boundaries, cross-root dependencies, and key decisions. No manual deployment steps.
+5. Validate. Fix and re-run until it passes.
+6. Reply per the Token Economy rules.
 
 ## Validation
 
-Run `scripts/validate-terraform.sh [root-path]` once, rather than issuing individual `terraform init` / `terraform validate` commands per directory manually. It initializes each root under `platform/` and `workloads/` without a backend and runs `terraform validate`, failing loudly with a nonzero exit code if anything breaks. Do not deliver code until it exits 0. If it fails: fix syntax/variable/type issues and re-run — don't hand-narrate each individual command's output back to the user.
+Run the validator once from the repo root:
 
-## Review Checklist
+- Windows: `pwsh scripts/validate-terraform.ps1 [root-path]`
+- Other platforms: `bash scripts/validate-terraform.sh [root-path]`
 
-Quick pass before finishing — these are pointers back to the rules above, not new rules:
-
-- [ ] Tier alignment determined and correct folder hierarchy used (`platform/` vs `workloads/`).
-- [ ] File framework and naming rules followed (no catch-all `main.tf`, one file per resource family, private endpoints colocated).
-- [ ] `scripts/validate-terraform.sh` exits 0.
-- [ ] Name-length guardrails present for Key Vault, Storage Account, and any other constrained resource (`references/naming-and-validation.md`).
-- [ ] WAF baseline applied — private-only data-plane defaults (`public_network_access_enabled = false`), NSG/route-table associations, diagnostics to Log Analytics (`references/waf-pillars.md` if you need the detail).
-- [ ] README present per root, no manual deployment steps, ADRs generated via `adr-generator`.
-- [ ] `.gitignore` present and state/local artifacts excluded from authoring source.
-- [ ] Region/environment parameterisation preserved unless a single-scope template was explicitly requested.
-- [ ] Lifecycle precondition blocks placed at the end of resource declarations, after `tags`.
+Don't run individual `terraform init` or `validate` commands. For every root, the script runs `init -backend=false` with a shared provider cache and then `validate`. It shows init output only on failure, prints one line per diagnostic, and ends with a `PASS` or `FAIL` summary line. Don't deliver until it prints `PASS`.
