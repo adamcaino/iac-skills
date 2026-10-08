@@ -1,156 +1,147 @@
 ---
 name: bicep-builder
-description: 'Create Bicep workloads for Microsoft Azure using the Microsoft Well-Architected Framework. Use when generating or refactoring Bicep, Azure landing zones, platform services, workload infrastructure, or IaC repositories that must use main.bicep for composition plus shared parent resource-family modules such as virtual-networks.bicep, virtual-machines.bicep, storage-accounts.bicep, and key-vaults.bicep instead of placing all resources into a monolithic template.'
+description: 'Create Bicep for Azure landing zones, platform services, and workloads aligned to the Microsoft Well-Architected Framework. Use when generating or refactoring Bicep IaC into main.bicep orchestration plus shared resource-family modules (virtual-networks.bicep, key-vaults.bicep, etc.) instead of a monolithic template.'
 argument-hint: 'Describe the Azure workload, resource types, environment, and any naming, security, networking, or deployment requirements.'
 ---
 
 # Azure Bicep Workload & Platform Builder
 
-Create or restructure Bicep for Azure workloads and platform services aligned to the Microsoft Well-Architected Framework, using a strict file decomposition model. Supports deployable platform roots (`platform/<domain>`), workload roots (`workloads/<workload>-<domain>`), or sibling roots sharing resource-family modules in `modules/`.
+Create or restructure Bicep for Azure platform and workload tiers, aligned to the Well-Architected Framework (WAF), using a strict file decomposition model. Scope is Bicep IaC only. Don't produce ADRs, pipelines, or deployment guides unless the user asks for them (`adr-generator` and `bicep-cicd` cover those).
 
-This file holds the rules needed on every task. Load a reference file only when the task needs it:
+Load `references/waf-pillars.md` only when a non-trivial design or security trade-off needs pillar reasoning. Everything else needed is in this file.
 
-- `references/naming-and-validation.md` — naming convention, name-length limits, guardrail pattern. Load when generating any resource name or parameter.
-- `references/waf-pillars.md` — Well-Architected pillar guidance and MSP security baseline. Load when making a design/security trade-off, not for routine module authoring.
-- `references/style-and-examples.md` — attribute grouping and full example layouts. Load once per session if you need a formatting reference; the pattern in "Authoring Rules" below is usually enough after the first file.
-- `scripts/validate-bicep.sh` — run this, don't reason through build commands manually (see Validation below).
+## Token Economy
 
-## Primary Outcomes
+These rules apply to every step:
 
-- Bicep organised for maintenance, reviewability, and safe change isolation across Platform and Workload tiers.
-- `main.bicep` is orchestration only — never a catch-all.
-- Determine or infer whether the target infrastructure belongs under `platform/` or `workloads/`.
-- Delegate ADR authoring to the `adr-generator` skill; store results under `ADRs/`.
-- Ask all clarifying questions about intent, tier placement, and constraints **up front, in one batch**, before generating any code — not iteratively as you go.
-- For a large or ambiguous ask, propose the file/module tree first and get it confirmed before writing file contents.
+- **One clarification round, at most.** If tier, environments, regions, or root split are genuinely ambiguous, ask every question in one message that also proposes the file tree. Otherwise state the assumptions and proceed. Never ask iteratively.
+- **Write, don't echo.** Create files with file tools. Never paste file contents into chat, and don't re-read files you just wrote.
+- **Generate only what's needed.** Create params files only for the environments and regions the user named (one if none were named). Don't add speculative modules, outputs, `config/` files, or parameters.
+- **Loop, don't repeat.** Use `for` expressions over parameter arrays for repeated resources such as subnets, NSG rules, private endpoints, and role assignments. Don't write near-identical blocks.
+- **Validate once.** Run the validator after all files are written. On failure, fix only the files it names and re-run.
+- **Lean final reply.** Give the file tree, assumptions and deviations, and the validator's summary line. Don't restate code or this checklist.
 
 ## Platform vs Workload Classification
 
-Determine or infer tier alignment before structuring files:
+- **Platform (`bicep/platform/<domain>/`):** centralized foundations, shared connectivity, and landing-zone governance across workloads or subscriptions. Examples: hub VNets, Virtual WAN, Azure Firewall, Bastion, Gateway/ExpressRoute, shared Private DNS zones, central Log Analytics, policy assignments. Example roots: `platform/hub-network/`, `platform/shared-services/`.
+- **Workload (`bicep/workloads/<workload>-<domain>/`):** app-, service-, or domain-specific infrastructure. Examples: spoke subnets, UDRs, NSGs, VMs, App Service, Container Apps/AKS, Azure SQL/Cosmos DB/PostgreSQL, storage, Key Vault, workload private endpoints. Example roots: `workloads/lims-data/`, `workloads/ecommerce-web/`.
 
-- **Platform (`platform/`):** Centralized foundations, shared connectivity, and landing zone governance managed across workloads or subscriptions.
-  - *Resources:* Hub VNets, Virtual WAN, Azure Firewall, Azure Bastion, Gateway/ExpressRoute, shared Private DNS zones, centralized Log Analytics workspaces, enterprise policy assignments.
-  - *Placement:* `bicep/platform/<domain>/` (e.g. `bicep/platform/hub-network/`, `bicep/platform/shared-services/`).
-- **Workload (`workloads/`):** Application-, service-, or domain-specific infrastructure supporting discrete workloads and consumer apps.
-  - *Resources:* Workload/spoke subnets, route tables (UDRs), NSGs, Virtual Machines, App Services, Container Apps/AKS, databases (Azure SQL, Cosmos DB, PostgreSQL), storage accounts, Key Vaults, private endpoints for workload components.
-  - *Placement:* `bicep/workloads/<workload>-<domain>/` (e.g. `bicep/workloads/lims-data/`, `bicep/workloads/ecommerce-web/`).
-
-If the request is ambiguous or combines platform and workload boundaries, ask to clarify the desired tier in the initial batch of questions.
+Infer the tier when you can. Ask only if the request mixes tiers ambiguously.
 
 ## Non-Negotiable File Framework
 
 ```text
 bicep/
-	modules/
-		virtual-networks.bicep
-		virtual-machines.bicep
-		storage-accounts.bicep
-		key-vaults.bicep
-	platform/
-		<domain>/
-			README.md
-			main.bicep
-			ADRs/001-<decision>.md
-			builds/env.<environment>.json
-			config/<purpose>.<environment>.json
-			params/env.<environment>.bicepparam
-	workloads/
-		<workload>-<domain>/
-			README.md
-			main.bicep
-			ADRs/001-<decision>.md
-			builds/env.<environment>.json
-			config/<purpose>.<environment>.json
-			params/env.<environment>.bicepparam
+	modules/<resource-family-plural>.bicep
+	platform/<domain>/
+		README.md
+		main.bicep
+		params/env.<environment>.bicepparam
+		builds/env.<environment>.json
+		config/<purpose>.<environment>.json
+	workloads/<workload>-<domain>/
+		(same layout as platform roots)
 ```
 
-**Folder presence:** `main.bicep`, `params/`, `README.md`, `ADRs/` always exist in a deployable root. `config/` only when external JSON config is needed — never an empty folder. `builds/` holds generated ARM parameter artifacts only; never hand-edit them. Shared parent modules reside in `bicep/modules/` (or `bicep/workloads/modules/` / `bicep/platform/modules/` if scoped).
-
-**`.gitignore`:** check repo root first; preserve if present; if absent, source from `https://raw.githubusercontent.com/Azure/bicep/main/.gitignore` and ensure `builds/` output isn't treated as authoring source.
-
-**Sub-workload / platform split:** split roots when resource groups differ materially in change cadence, approval requirements, ownership, or deletion blast radius. Keep tightly coupled resources together. Each root is a separate deployment stack — pass cross-root dependencies as resource ID parameters, never as module outputs. Record the split decision in `ADRs/`.
+- **Folder presence:** every deployable root has `main.bicep`, `params/`, and `README.md`. Create `config/` only when external JSON config is needed, and never leave it empty. `builds/` is generated by the validator. Never author or hand-edit it.
+- **Shared modules** live in `bicep/modules/`, or in `bicep/platform/modules/` or `bicep/workloads/modules/` if they're scoped to one tier.
+- **`.gitignore`:** if the repo root already has one, keep it and make sure it ignores `builds/`. Otherwise create a minimal one with `builds/` and `.azure/`. Don't fetch a template.
+- **Splitting roots:** split when resource groups differ materially in change cadence, approvals, ownership, or deletion blast radius. Keep tightly coupled resources together. Each root is its own deployment stack. Pass cross-root dependencies as resource ID parameters, never as module outputs. Note the split rationale in the root `README.md`.
 
 ## File Naming Rules
 
-- `main.bicep`: parameters, shared variables, module declarations, outputs only.
-- `bicep/modules/<resource-family-plural>.bicep` (or within subfolder modules), kebab-case, one resource family per file (e.g. `virtual-networks.bicep`). Split further with a suffix if a family grows too large (`virtual-machines-linux.bicep`).
-- `params/<environment>.bicepparam` or `params/<region>-<environment>.bicepparam` — prefer the region-environment form for multi-region roots.
-- `builds/env.<environment>.json`: generated, not authored.
-- `ADRs/<nnn>-<decision>.md`: one material decision per file, via `adr-generator`.
-- Private endpoints live in the same module as the resource they connect to — never a shared `private-endpoints.bicep`.
-- Data-plane role assignments sit with the closest resource module, or `modules/role-assignments.bicep` if shared broadly.
+- `main.bicep` holds parameters, shared variables, module declarations, and outputs only.
+- Modules are kebab-case, one resource family per file. If a family grows too large, split it with a suffix (`virtual-machines-linux.bicep`). Any family not in the table below gets a new module named after the resource type.
+- Name params files `params/env.<environment>.bicepparam`, or `params/env.<region>-<environment>.bicepparam` for multi-region roots.
+- Private endpoints live in the parent resource's module, linked to the matching private DNS zone.
+- Data-plane role assignments go in the closest resource module, or in `role-assignments.bicep` if they're shared broadly.
 
-### Resource Family Mapping
-
-| Azure concern | Default module |
+| Concern | Module |
 |---|---|
-| Resource groups | `modules/resource-groups.bicep` |
-| Virtual networks, subnets, peering | `modules/virtual-networks.bicep` |
-| Network security groups | `modules/network-security-groups.bicep` |
-| Route tables and routes | `modules/route-tables.bicep` |
-| Private DNS zones and links | `modules/private-dns-zones.bicep` |
-| Private endpoints | colocate with parent module |
-| Virtual machines and NICs | `modules/virtual-machines.bicep` |
-| Storage accounts and containers | `modules/storage-accounts.bicep` |
-| Key Vault and secret access model | `modules/key-vaults.bicep` |
-| Log Analytics / App Insights | `modules/observability.bicep` |
-| Diagnostic settings | `modules/diagnostic-settings.bicep` |
-| Role assignments | `modules/role-assignments.bicep` |
+| Resource groups | `resource-groups.bicep` |
+| VNets, subnets, peering | `virtual-networks.bicep` |
+| NSGs | `network-security-groups.bicep` |
+| Route tables | `route-tables.bicep` |
+| Private DNS zones and links | `private-dns-zones.bicep` |
+| VMs and NICs | `virtual-machines.bicep` |
+| Storage accounts | `storage-accounts.bicep` |
+| Key Vault | `key-vaults.bicep` |
+| Log Analytics / App Insights | `observability.bicep` |
+| Diagnostic settings | `diagnostic-settings.bicep` |
+| Role assignments | `role-assignments.bicep` |
 
-Unlisted families get a new kebab-case module matching the resource type.
+## Resource Naming
+
+Use the format `<acronym>-<workload>-<environment>-<location-code>-<instance>`, lowercase alphanumerics and hyphens only. Example: `kv-lz-prod-uks-01`.
+
+- **Acronyms:** `rg`, `vnet`, `nsg`, `fw`, `st`, `kv`, `law`, `pip`, `vhub`, `udr`, `nic`, `vm`.
+- **Environments:** `prod`, `staging`, `dev`, `test`.
+- **Location codes:** `uks`, `ukw`, `euw`, `eun`, `usc`, `use`.
+- **Tiers:** add a tier suffix to the workload part where needed, e.g. `nsg-db-…` and `nsg-app-…`.
+
+Build names in shared variables. If you create `modules/naming.bicep`, `main.bicep` must actually use it.
+
+**Length guardrails** are enforced at compile time, not by inspection:
+
+- Constrain inputs with `@minLength`, `@maxLength`, and `@allowed`.
+- Validate the exact computed name the resource uses, not just its inputs.
+- Use `assert` for computed names only when assertions are enabled in the target environment. The message must name the failing value and say what to shorten.
+
+Minimum coverage:
+
+- Key Vault: ≤ 24 characters.
+- Storage account: ≤ 24 characters, lowercase alphanumerics only.
+- DNS zones, App Service, and container registries: ≤ 63 characters.
+- Any other resource with a hard naming limit.
 
 ## Scope And Orchestration
 
-- Subscription-level landing zones: `targetScope = 'subscription'` in `main.bicep`.
-- `scope: resourceGroup(...)` must use compile-time resolvable values — never module outputs.
-- Prefer implicit dependencies via input/output references; add explicit `dependsOn` only when there's no data reference path.
+- Subscription-level landing zones set `targetScope = 'subscription'` in `main.bicep`.
+- `scope: resourceGroup(...)` takes compile-time-resolvable values only, never module outputs.
+- Prefer implicit dependencies through references. Use `dependsOn` only when no data reference path exists.
+- Add outputs only for values consumed externally or across a root boundary.
 
 ## Authoring Rules
 
-- Keep naming/tags in shared variables. Prefer explicit names over generated ones.
-- Group resource properties with blank lines by concern (identity → config → nested objects → tags). See `references/style-and-examples.md` if you need the worked example.
-- Enforce name-length limits with parameter decorators by default (`@minLength`/`@maxLength`); use `assert` only when assertions are enabled in the target environment. Full pattern: `references/naming-and-validation.md`.
-- Deterministic RBAC naming: `guid(scopeResourceId, principalId, roleSeed)`. Set `principalType` explicitly when known.
-- Diagnostics: model targets as `existing`, apply at resource scope, prefer stable API versions, prefer explicit categories over category groups.
-- Brief comments only where intent isn't obvious from the code.
-- Template portability by default — `@allowed` lists for multi-environment/region — unless the user explicitly asks to pin to one.
+- Group properties with blank lines, in this order: identity metadata (`name`, `location`, `scope`), then service config (SKU, flags, access model, retention), then nested objects (`identity`, `networkAcls`, `properties`, child resources), then `tags` last on its own.
+- Name RBAC assignments deterministically: `guid(scopeResourceId, principalId, roleSeed)`. Set `principalType` when known.
+- Model diagnostic targets as `existing` and apply them at resource scope. Prefer stable API versions and explicit log categories over category groups.
+- Keep templates portable: use `@allowed` lists for environments and regions, unless the user asks to pin one.
+- Comment only where intent isn't obvious from the code.
 
-## Hard Prohibitions
+### Security Baseline And Prohibitions
 
-- No catch-all `main.bicep`.
-- No mixing networking/compute/storage/observability/security in one module.
-- No unexplained defaults hiding security or reliability settings.
-- No `publicNetworkAccess: 'Enabled'` on Storage, Key Vault, AI Services, or ML by default — explicit user request only.
-- No centralising private endpoints into a shared module when they're tightly tied to a specific resource.
-- No hard-coding a single environment/region unless explicitly requested.
+Apply these unless the user explicitly overrides them:
+
+- Storage, Key Vault, AI Services, and ML get `publicNetworkAccess: 'Disabled'`.
+- Key Vault uses `enableRbacAuthorization: true`, with no access policies.
+- App and platform subnets get an NSG and a route table, unless explicitly waived.
+- Use managed identities over secrets. Secrets never go in plain-text parameters.
+- Send diagnostics for critical services to Log Analytics.
+- Size SKUs for the workload. Make pricing-sensitive choices parameters.
+
+Never:
+
+- Write a catch-all `main.bicep`.
+- Mix networking, compute, storage, observability, or security in one module.
+- Hide security or reliability settings behind unexplained defaults.
+- Put private endpoints in a shared module.
+- Hard-code a single environment or region unless the user asks for it.
 
 ## Delivery Pattern
 
-1. Determine or infer tier alignment (**Platform** under `platform/` vs **Workload** under `workloads/`). Ask all clarifying questions in one batch (intent, tier, constraints, split vs single root).
-2. Identify resource families; decide root split; record split rationale for the ADR.
-3. Check/create `.gitignore`.
-4. Propose the file tree (indicating `platform/` or `workloads/` path); get confirmation before writing contents if the ask is large or ambiguous.
-5. Write `main.bicep` per root, shared modules, `params/`, `config/` as needed.
-6. Place private endpoints beside their parent resource.
-7. Add outputs only for values consumed externally or across a root boundary.
-8. Write a short `README.md` per root (scope, module boundaries, cross-root dependencies, key decisions — no manual deployment steps).
-9. Invoke `adr-generator` for material decisions.
-10. Run `scripts/validate-bicep.sh` (see Validation below). Fix and re-run until it exits 0.
-11. Run the Review Checklist below.
+1. Infer the tier and root split. If anything is genuinely ambiguous, ask once and include the proposed tree.
+2. Check or create `.gitignore`.
+3. Write each root's `main.bicep`, then the shared modules, then `params/` (and `config/` only if needed).
+4. Write a short `README.md` per root, 40 lines at most. Cover scope, module boundaries, cross-root dependencies, and key decisions. No manual deployment steps.
+5. Validate. Fix and re-run until it passes.
+6. Reply per the Token Economy rules.
 
 ## Validation
 
-Run `scripts/validate-bicep.sh [root-path]` once, rather than issuing individual `bicep build` / `az bicep build-params` commands per file. It builds every shared module, every root's `main.bicep` under `platform/` and `workloads/`, and every `.bicepparam` file into its matching `builds/` artifact, and fails loudly with a nonzero exit code if anything breaks. Do not deliver code until it exits 0. If it fails: fix syntax/parameter/type issues and re-run — don't hand-narrate each individual build command's output back to the user.
+Run the validator once from the repo root:
 
-## Review Checklist
+- Windows: `pwsh scripts/validate-bicep.ps1 [root-path]`
+- Other platforms: `bash scripts/validate-bicep.sh [root-path]`
 
-Quick pass before finishing — these are pointers back to the rules above, not new rules:
-
-- [ ] Tier alignment determined and correct folder hierarchy used (`platform/` vs `workloads/`).
-- [ ] File framework and naming rules followed (no catch-all `main.bicep`, modules per resource family, private endpoints colocated).
-- [ ] `scripts/validate-bicep.sh` exits 0.
-- [ ] Name-length guardrails present for Key Vault, Storage, and any other constrained resource (`references/naming-and-validation.md`).
-- [ ] WAF baseline applied — private-only data-plane defaults, NSG/route-table associations, diagnostics to Log Analytics (`references/waf-pillars.md` if you need the detail).
-- [ ] README present per root, no manual deployment steps, ADRs generated via `adr-generator`.
-- [ ] `.gitignore` present and generated artifacts excluded from authoring source.
-- [ ] Region/environment parameterisation preserved unless a single-scope template was explicitly requested.
+Don't run individual `bicep build` commands. The script builds every root `main.bicep` (which compiles the modules it references), any module no root references, and every `params/*.bicepparam` into `builds/env.<env>.json`. It prints each diagnostic once and ends with a `PASS` or `FAIL` summary line. Don't deliver until it prints `PASS`.

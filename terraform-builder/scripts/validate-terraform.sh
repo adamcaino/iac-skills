@@ -1,54 +1,69 @@
 #!/usr/bin/env bash
-# Validates all Terraform platform and workload roots under a target directory tree.
-# Initializes each root without a backend and runs terraform validate.
+# Validates every Terraform root (directory containing main.tf) under a tree.
+# Runs `terraform init -backend=false` and `terraform validate` per root. Init output is shown
+# only on failure; diagnostics are printed one per line as <path>:<line>: <severity>: <message>
+# (falls back to compact plain text if python3 is unavailable). Provider plugins are cached
+# across roots (TF_PLUGIN_CACHE_DIR) to avoid repeat downloads. Exits 1 on any error.
+# Windows: use validate-terraform.ps1 instead.
 #
-# Usage: ./validate-terraform.sh [root-path]
-#   root-path defaults to terraform (or current directory if not found)
+# Usage: ./validate-terraform.sh [root-path]   (defaults to ./terraform if present, else .)
 
-set -euo pipefail
+set -uo pipefail
+export TF_IN_AUTOMATION=1
+export TF_PLUGIN_CACHE_DIR="${TF_PLUGIN_CACHE_DIR:-$HOME/.terraform.d/plugin-cache}"
+mkdir -p "$TF_PLUGIN_CACHE_DIR"
 
 TARGET="${1:-}"
 if [ -z "$TARGET" ]; then
-	if [ -d "terraform" ]; then
-		TARGET="terraform"
-	elif [ -d "workloads" ] || [ -d "platform" ]; then
-		TARGET="."
-	else
-		TARGET="."
-	fi
+	if [ -d "terraform" ]; then TARGET="terraform"; else TARGET="."; fi
 fi
-
-FAIL=0
-
-validate_dir() {
-	local d="$1"
-	echo "== Validating Terraform in $d =="
-	terraform -chdir="$d" init -backend=false || FAIL=1
-	terraform -chdir="$d" validate || FAIL=1
-}
 
 if [ -f "$TARGET/main.tf" ]; then
-	validate_dir "$TARGET"
+	ROOTS=("$TARGET")
 else
-	found=0
-	while IFS= read -r main_file; do
-		[ -n "$main_file" ] || continue
-		found=1
-		workload_dir="$(dirname "$main_file")"
-		validate_dir "$workload_dir"
-	done < <(find "$TARGET" -maxdepth 4 -name "main.tf" -not -path "*/.*/*" | sort)
+	mapfile -t ROOTS < <(find "$TARGET" -maxdepth 4 -name "main.tf" -not -path "*/.*/*" -exec dirname {} \; | sort)
+fi
+if [ "${#ROOTS[@]}" -eq 0 ]; then echo "FAIL no main.tf found under $TARGET"; exit 1; fi
 
-	if [ "$found" -eq 0 ]; then
-		echo "No main.tf found under $TARGET" >&2
-		exit 1
+FORMAT_PY='
+import json, sys
+root = sys.argv[1]
+r = json.load(sys.stdin)
+for d in r.get("diagnostics", []):
+    rng = d.get("range")
+    where = "%s/%s:%s" % (root, rng["filename"], rng["start"]["line"]) if rng else root
+    detail = " - " + " ".join(d["detail"].split()) if d.get("detail") else ""
+    print("%s: %s: %s%s" % (where, d["severity"], d["summary"], detail))
+'
+
+FAIL=0; roots=0; errors=0; warnings=0
+LOG="$(mktemp)"
+trap 'rm -f "$LOG"' EXIT
+
+for root in "${ROOTS[@]}"; do
+	roots=$((roots + 1))
+	rel="${root#./}"
+	if ! terraform -chdir="$root" init -backend=false -input=false -no-color </dev/null >"$LOG" 2>&1; then
+		FAIL=1; errors=$((errors + 1))
+		echo "$rel: init failed"
+		sed '/^[[:space:]]*$/d' "$LOG" | tail -n 15 | sed 's/^/  /'
+		continue
 	fi
-fi
 
-if [ "$FAIL" -ne 0 ]; then
-	echo "" >&2
-	echo "One or more Terraform validations failed. See output above." >&2
-	exit 1
-fi
+	if command -v python3 >/dev/null 2>&1; then
+		terraform -chdir="$root" validate -json -no-color </dev/null >"$LOG" 2>/dev/null || FAIL=1
+		out="$(python3 -c "$FORMAT_PY" "$rel" <"$LOG")"
+	else
+		terraform -chdir="$root" validate -no-color </dev/null >"$LOG" 2>&1 || FAIL=1
+		out="$(grep -v '^Success!' "$LOG" | sed '/^[[:space:]]*$/d')"
+	fi
+	if [ -n "$out" ]; then
+		echo "$out"
+		errors=$((errors + $(grep -cE '(: error: |^Error: )' <<<"$out" || true)))
+		warnings=$((warnings + $(grep -cE '(: warning: |^Warning: )' <<<"$out" || true)))
+	fi
+done
 
-echo ""
-echo "All Terraform configurations validated successfully."
+summary="roots=$roots errors=$errors warnings=$warnings"
+if [ "$FAIL" -ne 0 ]; then echo "FAIL $summary"; exit 1; fi
+echo "PASS $summary"

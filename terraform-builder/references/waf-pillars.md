@@ -12,9 +12,4 @@ Reason generated Terraform against these when making a design decision — not a
 
 **Performance Efficiency** — service tiers matched to workload intent; avoid unnecessary cross-region/cross-network latency; leave headroom for horizontal growth where the workload profile suggests it.
 
-## MSP Security Baseline (default unless the user overrides)
-
-- Private-only data-plane access for Storage, Key Vault, Azure AI Services — `public_network_access_enabled = false` by default; public access needs an explicit user override.
-- Private endpoints colocated with the parent resource file, linked to the matching private DNS zone.
-- Subnet-level NSG and route-table association for app/platform subnets unless explicitly waived.
-- Key Vault: `rbac_authorization_enabled = true`, no access-policy sprawl.
+The default security baseline is in `SKILL.md` ("Security Baseline And Prohibitions").
